@@ -1,59 +1,109 @@
 const { parse, print } = require('recast');
 const { visit, namedTypes, builders } = require('ast-types');
-const { readFileSync, writeFileSync } = require('fs');
-const { dirname, basename, extname, join } = require('path');
+const { readFile, writeFile } = require('fs');
+const { dirname, basename, extname, join, relative } = require('path');
+const glob = require('glob');
+const { promisify } = require('util');
 
-const filePathes = [
-    'C:\\work\\DevExtreme\\js\\events\\swipe.js',
-    'C:\\work\\DevExtreme\\js\\ui\\lookup.js',
-    'C:\\work\\DevExtreme\\js\\ui\\popover.js'
-];
+const baseDirectory = process.argv[2] || 'C:\\work\\DevExtreme';
 
-filePathes.forEach((filePath) => {
-    const fileString = readFileSync(filePath).toString();
-    const ast = parse(fileString, {
-        sourceType: 'module'
-    });
+function capitalizeFirst(string) {
+    return string.charAt(0).toUpperCase() + string.slice(1);
+}
 
-    function getCode(node) {
-        return fileString.substr(node.start, node.end - node.start);
+
+const replacementTable = {};
+
+for (const method of ['width', 'height', 'outerWidth', 'outerHeight', 'innerWidth', 'innerHeight']) {
+    function replaceWithExpression(path, callee, methodName) {
+        const replacement = `${path.node.arguments.length ? 'set' : 'get'}${capitalizeFirst(methodName)}`
+        path.replace(
+            builders.callExpression(
+                builders.identifier(replacement),
+                [callee.object, ...path.node.arguments]
+            )
+        );
+        return replacement;
     }
+    replacementTable[method] = (path, callee) => replaceWithExpression(path, callee, method);
+}
 
-    const replacementTable = {
-        height(path, callee) {
-            path.replace(
-                builders.callExpression(
-                    builders.identifier('calculateHeight'),
-                    [callee.object, ...path.node.arguments]
-                )
-            );
-        },
-        width(path, callee) {
+glob(join(baseDirectory, 'js/**/*.js'), async (err, filePathes) => {
 
+    const sizejs = join(baseDirectory, 'js/core/utils/size');
+    let processed = filePathes.length;
+
+    await Promise.all(filePathes.map(async (filePath) => {
+        const fileString = (await promisify(readFile)(filePath)).toString();
+        const pathToSizejs = relative(dirname(filePath), sizejs).replace(/\\/g, '/');
+        function getCode(node) {
+            return fileString.substr(node.original.start, node.original.end - node.original.start);
         }
-    }
 
-    visit(ast, {
-        visitCallExpression(path) {
-            let code = getCode(path.node);
 
-            let name;
-            const callee = path.node.callee;
-            if (namedTypes.MemberExpression.check(callee)) {
-                name = callee.property.name;
-            } else {
+        const ast = parse(fileString, {
+            parser: require('recast/parsers/babel')
+        });
+
+        const newAPI = {};
+
+        visit(ast, {
+            visitCallExpression(path) {
+                let name;
+                const callee = path.node.callee;
+                if (namedTypes.MemberExpression.check(callee)) {
+                    name = callee.property.name;
+                } else {
+                    this.traverse(path);
+                    return;
+                }
+                const defaultAPI = replacementTable.__proto__[name];
+                const replacement = !defaultAPI && replacementTable[name];
+                if (replacement) {
+                    const addAPI = replacement(path, callee);
+                    if (namedTypes.MemberExpression.check(path.parent.node)) {
+                        path.node.comments = [builders.commentBlock(' TODO JQUERY-REPLACER: Manual check needed! ')];
+                        debugger;
+                    }
+                    if (addAPI)
+                        newAPI[addAPI] = true;
+                }
                 this.traverse(path);
-                return;
+            },
+        });
+        const newapiKeys = Object.keys(newAPI);
+        if (newapiKeys.length) {
+            shouldAdd = true;
+            visit(ast, {
+                visitImportDeclaration(path) {
+                    const code = getCode(path.node);
+                    if (path.node.source.extra.raw.slice(1, -1) === pathToSizejs) {
+                        const currentSpecifiers = path.node.specifiers.map(x => x.imported.name);
+                        const specifiersToAdd = newapiKeys.filter(x => !currentSpecifiers.includes(x));
+                        path.replace(builders.importDeclaration(
+                            [...path.node.specifiers, ...specifiersToAdd.map(x => builders.importSpecifier(builders.identifier(x)))],
+                            path.node.source
+                        ));
+                        shouldAdd = false;
+                    }
+                    this.traverse(path);
+                },
+            });
+            if (shouldAdd) {
+                ast.program.body.unshift(builders.importDeclaration(
+                    [...newapiKeys.map(x => builders.importSpecifier(builders.identifier(x)))],
+                    builders.stringLiteral(pathToSizejs)
+                ))
             }
-            const replacement = replacementTable[name];
-            if (replacement) {
-                replacement(path, callee);
-            }
-            this.traverse(path);
-        },
-    });
+        }
 
-    const result = print(ast);
+        const result = print(ast, { quote: 'single' });
+        const ext = extname(filePath);
+        const base = basename(filePath).slice(0, -ext.length);
 
-    writeFileSync(join(dirname(filePath), `${basename(filePath)}_modified.${extname(filePath)}`), result.code);
-})
+        if (Object.keys(newAPI).length)
+            await promisify(writeFile)(filePath, result.code);
+        processed--;
+        console.log(`Remaining: ${processed}`);
+    }));
+});

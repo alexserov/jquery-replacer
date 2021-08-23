@@ -9,8 +9,10 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "dependencies": {    
+  "dependencies": {
+    "@babel/parser": "^7.15.3",
     "ast-types": "^0.14.2",
+    "glob": "^7.1.7",
     "recast": "^0.20.5"
   }
 }
