@@ -9,11 +9,8 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "dependencies": {
-    "@babel/core": "^7.15.0",
-    "@babel/generator": "^7.15.0",
-    "@babel/parser": "^7.15.3",
-    "@babel/traverse": "^7.15.0",
-    "@babel/types": "^7.15.0"
+  "dependencies": {    
+    "ast-types": "^0.14.2",
+    "recast": "^0.20.5"
   }
 }

@@ -1,7 +1,5 @@
-const parser = require('@babel/parser');
-const generator = require('@babel/generator').default;
-const traverse = require('@babel/traverse').default;
-const types = require('@babel/types');
+const { parse, print } = require('recast');
+const { visit, namedTypes, builders } = require('ast-types');
 const { readFileSync, writeFileSync } = require('fs');
 const { dirname, basename, extname, join } = require('path');
 
@@ -13,7 +11,7 @@ const filePathes = [
 
 filePathes.forEach((filePath) => {
     const fileString = readFileSync(filePath).toString();
-    const ast = parser.parse(fileString, {
+    const ast = parse(fileString, {
         sourceType: 'module'
     });
 
@@ -23,37 +21,39 @@ filePathes.forEach((filePath) => {
 
     const replacementTable = {
         height(path, callee) {
-            path.replaceWith(
-                types.callExpression(
-                    types.identifier('calculateHeight'),
+            path.replace(
+                builders.callExpression(
+                    builders.identifier('calculateHeight'),
                     [callee.object, ...path.node.arguments]
                 )
-            );            
+            );
         },
         width(path, callee) {
 
         }
     }
 
-    traverse(ast, {
-        CallExpression(path) {
+    visit(ast, {
+        visitCallExpression(path) {
             let code = getCode(path.node);
 
             let name;
             const callee = path.node.callee;
-            if (types.isMemberExpression(callee)) {
+            if (namedTypes.MemberExpression.check(callee)) {
                 name = callee.property.name;
             } else {
+                this.traverse(path);
                 return;
             }
             const replacement = replacementTable[name];
             if (replacement) {
                 replacement(path, callee);
             }
+            this.traverse(path);
         },
     });
 
-    const result = generator(ast);
+    const result = print(ast);
 
     writeFileSync(join(dirname(filePath), `${basename(filePath)}_modified.${extname(filePath)}`), result.code);
 })
