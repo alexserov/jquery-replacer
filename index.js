@@ -60,10 +60,13 @@ glob(join(baseDirectory, 'js/**/*.js'), async (err, filePathes) => {
                 const defaultAPI = replacementTable.__proto__[name];
                 const replacement = !defaultAPI && replacementTable[name];
                 if (replacement) {
+                    let addComment = false;
+                    if (namedTypes.MemberExpression.check(path.parent.node)) {
+                        addComment = true;
+                    }
                     const addAPI = replacement(path, callee);
-                    if (namedTypes.MemberExpression.check(path.parent.node) || namedTypes.CallExpression.check(path.parent.node)) {
+                    if (addComment) {
                         path.node.comments = [builders.commentBlock(' TODO JQUERY-REPLACER: Manual check needed! ')];
-                        debugger;
                     }
                     if (addAPI)
                         newAPI[addAPI] = true;
