@@ -16,13 +16,26 @@ const replacementTable = {};
 
 for (const method of ['width', 'height', 'outerWidth', 'outerHeight', 'innerWidth', 'innerHeight']) {
     function replaceWithExpression(path, callee, methodName) {
-        const replacement = `${path.node.arguments.length ? 'set' : 'get'}${capitalizeFirst(methodName)}`
+        let argLength = path.node.arguments.length;
+        let addComment = false;
+        if (argLength) {
+            if (namedTypes.BooleanLiteral.check(path.node.arguments[0])) {
+                argLength = 0;
+            }
+        }
+        if (argLength && !namedTypes.ExpressionStatement.check(path.parent.node)) {
+            addComment = true;
+        }
+        const replacement = `${argLength ? 'set' : 'get'}${capitalizeFirst(methodName)}`
         path.replace(
             builders.callExpression(
                 builders.identifier(replacement),
                 [callee.object, ...path.node.arguments]
             )
         );
+        if (addComment) {
+            path.node.comments = [builders.commentBlock(' TODO JQUERY-REPLACER: Incorrect setter usage! ')];
+        }
         return replacement;
     }
     replacementTable[method] = (path, callee) => replaceWithExpression(path, callee, method);
