@@ -61,7 +61,7 @@ glob(join(baseDirectory, 'js/**/*.js'), async (err, filePathes) => {
                 const replacement = !defaultAPI && replacementTable[name];
                 if (replacement) {
                     const addAPI = replacement(path, callee);
-                    if (namedTypes.MemberExpression.check(path.parent.node)) {
+                    if (namedTypes.MemberExpression.check(path.parent.node) || namedTypes.CallExpression.check(path.parent.node)) {
                         path.node.comments = [builders.commentBlock(' TODO JQUERY-REPLACER: Manual check needed! ')];
                         debugger;
                     }
