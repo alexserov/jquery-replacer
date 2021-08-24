@@ -49,6 +49,9 @@ glob(join(baseDirectory, 'js/**/*.js'), async (err, filePathes) => {
     await Promise.all(filePathes.map(async (filePath) => {
         const fileString = (await promisify(readFile)(filePath)).toString();
         const pathToSizejs = relative(dirname(filePath), sizejs).replace(/\\/g, '/');
+        if (pathToSizejs[0] !== '.') {
+            pathToSizejs = './' + pathToSizejs;
+        }
         function getCode(node) {
             return fileString.substr(node.original.start, node.original.end - node.original.start);
         }
