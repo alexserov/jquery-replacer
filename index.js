@@ -5,7 +5,8 @@ const { dirname, basename, extname, join, relative } = require('path');
 const glob = require('glob');
 const { promisify } = require('util');
 
-const baseDirectory = process.argv[2] || 'C:\\work\\DevExtreme';
+const baseDirectory = (process.argv[2] || '-').replace(/^-$/, 'C:\\work\\DevExtreme');
+const searchPattern = (process.argv[3] || '-').replace(/^-$/,  '**/*.{js,ts}');
 
 function capitalizeFirst(string) {
     return string.charAt(0).toUpperCase() + string.slice(1);
@@ -41,16 +42,22 @@ for (const method of ['width', 'height', 'outerWidth', 'outerHeight', 'innerWidt
     replacementTable[method] = (path, callee) => replaceWithExpression(path, callee, method);
 }
 
-glob(join(baseDirectory, 'js/**/*.js'), async (err, filePathes) => {
-
-    const sizejs = join(baseDirectory, 'js/core/utils/size');
+glob(join(baseDirectory, searchPattern), async (err, filePathes) => {
+    const absoluteSizeJs = join(baseDirectory, 'js/core/utils/size');
+    const fixedSizeJs = 'core/utils/size';
+    filePathes = filePathes.filter(x => !x.endsWith('.d.ts'));
     let processed = filePathes.length;
 
     await Promise.all(filePathes.map(async (filePath) => {
         const fileString = (await promisify(readFile)(filePath)).toString();
-        const pathToSizejs = relative(dirname(filePath), sizejs).replace(/\\/g, '/');
-        if (pathToSizejs[0] !== '.') {
-            pathToSizejs = './' + pathToSizejs;
+        let pathToSizejs;
+        if (filePath.includes('testing')) {
+            pathToSizejs = relative(dirname(filePath), absoluteSizeJs).replace(/\\/g, '/');
+            if (pathToSizejs[0] !== '.') {
+                pathToSizejs = './' + pathToSizejs;
+            }
+        } else {
+            pathToSizejs = fixedSizeJs;
         }
         function getCode(node) {
             return fileString.substr(node.original.start, node.original.end - node.original.start);
@@ -58,7 +65,7 @@ glob(join(baseDirectory, 'js/**/*.js'), async (err, filePathes) => {
 
 
         const ast = parse(fileString, {
-            parser: require('recast/parsers/babel')
+            parser: extname(filePath) === '.ts' ? require('recast/parsers/typescript') : require('recast/parsers/babel')
         });
 
         const newAPI = {};
@@ -97,7 +104,12 @@ glob(join(baseDirectory, 'js/**/*.js'), async (err, filePathes) => {
                 visitImportDeclaration(path) {
                     const code = getCode(path.node);
                     if (path.node.source.extra.raw.slice(1, -1) === pathToSizejs) {
-                        const currentSpecifiers = path.node.specifiers.map(x => x.imported.name);
+
+                        const currentSpecifiers = path.node.specifiers.map(x => {
+                            if (namedTypes.ImportDefaultSpecifier.check(x))
+                                return '';
+                            return x.imported.name;
+                        });
                         const specifiersToAdd = newapiKeys.filter(x => !currentSpecifiers.includes(x));
                         path.replace(builders.importDeclaration(
                             [...path.node.specifiers, ...specifiersToAdd.map(x => builders.importSpecifier(builders.identifier(x)))],
@@ -116,7 +128,7 @@ glob(join(baseDirectory, 'js/**/*.js'), async (err, filePathes) => {
             }
         }
 
-        const result = print(ast, { quote: 'single' });
+        const result = print(ast, { quote: 'single', lineTerminator: '\n' });
         const ext = extname(filePath);
         const base = basename(filePath).slice(0, -ext.length);
 
