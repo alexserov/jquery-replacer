@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 const { parse, print } = require('recast');
 const { visit, namedTypes, builders } = require('ast-types');
 const { readFile, writeFile } = require('fs');
@@ -5,8 +7,34 @@ const { dirname, basename, extname, join, relative } = require('path');
 const glob = require('glob');
 const { promisify } = require('util');
 
-const baseDirectory = (process.argv[2] || '-').replace(/^-$/, 'C:\\work\\DevExtreme');
-const searchPattern = (process.argv[3] || '-').replace(/^-$/,  '**/*.{js,ts}');
+const baseDirectory = process.cwd();
+const searchPattern = (process.argv[process.argv.length - 1] || '-').replace(/^-$/, '**/*.{js,ts}');
+const flags = {
+    setters: true,
+    getters: true,
+    todos: true,
+}
+if (process.argv.length > 3) {
+    const options = process.argv.slice(2, -1);
+    const tempFlags = {}
+    options.forEach(opt => {
+        [...opt].forEach(char => {
+            tempFlags[char] = true;
+        })
+    });
+    const getFlagValue = (ch, def) => {
+        const upper = ch.toUpperCase();
+        const lower = ch.toLowerCase();
+        if (tempFlags[upper])
+            return true;
+        if (tempFlags[lower])
+            return false;
+        return def;
+    }
+    flags.setters = getFlagValue('s', true);
+    flags.getters = getFlagValue('g', true);
+    flags.todos = getFlagValue('t', true);
+}
 
 function capitalizeFirst(string) {
     return string.charAt(0).toUpperCase() + string.slice(1);
@@ -26,7 +54,13 @@ for (const method of ['width', 'height', 'outerWidth', 'outerHeight', 'innerWidt
         }
         if (argLength && !namedTypes.ExpressionStatement.check(path.parent.node)) {
             addComment = true;
+            if (!flags.todos)
+                return;
         }
+        if (argLength && !flags.setters)
+            return;
+        if (!argLength && !flags.getters)
+            return;
         const replacement = `${argLength ? 'set' : 'get'}${capitalizeFirst(methodName)}`
         path.replace(
             builders.callExpression(
@@ -51,7 +85,7 @@ glob(join(baseDirectory, searchPattern), async (err, filePathes) => {
     await Promise.all(filePathes.map(async (filePath) => {
         const fileString = (await promisify(readFile)(filePath)).toString();
         let pathToSizejs;
-        if (filePath.includes('testing')) {
+        if (!filePath.includes('testing')) {
             pathToSizejs = relative(dirname(filePath), absoluteSizeJs).replace(/\\/g, '/');
             if (pathToSizejs[0] !== '.') {
                 pathToSizejs = './' + pathToSizejs;
@@ -86,6 +120,10 @@ glob(join(baseDirectory, searchPattern), async (err, filePathes) => {
                     let addComment = false;
                     if (namedTypes.MemberExpression.check(path.parent.node)) {
                         addComment = true;
+                        if (!flags.todos) {
+                            this.traverse(path);
+                            return;
+                        }
                     }
                     const addAPI = replacement(path, callee);
                     if (addComment) {
